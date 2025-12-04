@@ -10,7 +10,10 @@ from llm_engineering.domain.exceptions import ImproperlyConfigured
 from llm_engineering.infrastructure.db.mongo import connection
 from llm_engineering.settings import settings
 
-_database = connection.get_database(settings.DATABASE_NAME)
+
+def _get_database():
+    """Lazily get the Mongo database to avoid import-time failures."""
+    return connection.get_database(settings.DATABASE_NAME)
 
 
 T = TypeVar("T", bound="NoSQLBaseDocument")
@@ -65,7 +68,7 @@ class NoSQLBaseDocument(BaseModel, Generic[T], ABC):
         return dict_
 
     def save(self: T, **kwargs) -> T | None:
-        collection = _database[self.get_collection_name()]
+        collection = _get_database()[self.get_collection_name()]
         try:
             collection.insert_one(self.to_mongo(**kwargs))
 
@@ -77,7 +80,7 @@ class NoSQLBaseDocument(BaseModel, Generic[T], ABC):
 
     @classmethod
     def get_or_create(cls: Type[T], **filter_options) -> T:
-        collection = _database[cls.get_collection_name()]
+        collection = _get_database()[cls.get_collection_name()]
         try:
             instance = collection.find_one(filter_options)
             if instance:
@@ -94,7 +97,7 @@ class NoSQLBaseDocument(BaseModel, Generic[T], ABC):
 
     @classmethod
     def bulk_insert(cls: Type[T], documents: list[T], **kwargs) -> bool:
-        collection = _database[cls.get_collection_name()]
+        collection = _get_database()[cls.get_collection_name()]
         try:
             collection.insert_many(doc.to_mongo(**kwargs) for doc in documents)
 
@@ -106,7 +109,7 @@ class NoSQLBaseDocument(BaseModel, Generic[T], ABC):
 
     @classmethod
     def find(cls: Type[T], **filter_options) -> T | None:
-        collection = _database[cls.get_collection_name()]
+        collection = _get_database()[cls.get_collection_name()]
         try:
             instance = collection.find_one(filter_options)
             if instance:
@@ -120,7 +123,7 @@ class NoSQLBaseDocument(BaseModel, Generic[T], ABC):
 
     @classmethod
     def bulk_find(cls: Type[T], **filter_options) -> list[T]:
-        collection = _database[cls.get_collection_name()]
+        collection = _get_database()[cls.get_collection_name()]
         try:
             instances = collection.find(filter_options)
             return [document for instance in instances if (document := cls.from_mongo(instance)) is not None]
