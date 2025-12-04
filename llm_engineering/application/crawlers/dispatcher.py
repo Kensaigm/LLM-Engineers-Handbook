@@ -5,6 +5,7 @@ from loguru import logger
 
 from .base import BaseCrawler
 from .custom_article import CustomArticleCrawler
+from .document import DocumentCrawler
 from .github import GithubCrawler
 from .linkedin import LinkedInCrawler
 from .medium import MediumCrawler
@@ -35,6 +36,11 @@ class CrawlerDispatcher:
 
         return self
 
+    def register_documents(self) -> "CrawlerDispatcher":
+        self.register("file://", DocumentCrawler)
+
+        return self
+
     def register(self, domain: str, crawler: type[BaseCrawler]) -> None:
         parsed_domain = urlparse(domain)
         domain = parsed_domain.netloc
@@ -42,6 +48,9 @@ class CrawlerDispatcher:
         self._crawlers[r"https://(www\.)?{}/*".format(re.escape(domain))] = crawler
 
     def get_crawler(self, url: str) -> BaseCrawler:
+        if url.endswith(('.pdf', '.epub')) or url.startswith('file://'):
+            return DocumentCrawler()
+
         for pattern, crawler in self._crawlers.items():
             if re.match(pattern, url):
                 return crawler()
