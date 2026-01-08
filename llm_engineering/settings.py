@@ -68,9 +68,10 @@ class Settings(BaseSettings):
     LINKEDIN_USERNAME: str | None = None
     LINKEDIN_PASSWORD: str | None = None
 
-    # Confluence Credentials
+    # Confluence Credentials (for API-based crawler)
     CONFLUENCE_API_TOKEN: str | None = None
     CONFLUENCE_USERNAME: str | None = None
+    CONFLUENCE_BASE_URL: str | None = None  # e.g., https://act-chargers.atlassian.net/wiki
 
     @property
     def OPENAI_MAX_TOKEN_WINDOW(self) -> int:
