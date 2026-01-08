@@ -44,6 +44,7 @@ class PostDocument(Document):
 
 class ArticleDocument(Document):
     link: str
+    content_hash: Optional[str] = None
 
     class Settings:
         name = DataCategory.ARTICLES
