@@ -39,6 +39,7 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
             return
 
         logger.info("Attempting to log in to Confluence...")
+        logger.info(f"Username: {settings.CONFLUENCE_USERNAME}")
 
         # Navigate to Atlassian login page
         base_url = "https://id.atlassian.com/login"
@@ -47,40 +48,98 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
 
         try:
             # Enter username/email
+            logger.info("Looking for username field...")
             username_field = WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.ID, "username"))
             )
             username_field.clear()
             username_field.send_keys(settings.CONFLUENCE_USERNAME)
+            logger.info("Username entered")
 
             # Click continue/submit button
             submit_button = self.driver.find_element(By.ID, "login-submit")
             submit_button.click()
-            time.sleep(3)
+            logger.info("Clicked continue button")
+            time.sleep(5)  # Increased wait time
+
+            # Check for error messages on username page
+            page_source = self.driver.page_source.lower()
+            if "doesn't match" in page_source or "not found" in page_source or "incorrect" in page_source:
+                logger.error("Username not recognized by Atlassian")
+                raise ImproperlyConfigured(
+                    f"Username '{settings.CONFLUENCE_USERNAME}' not recognized. "
+                    "Verify this is your Atlassian account email."
+                )
 
             # Enter password (API token for Atlassian Cloud)
-            password_field = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.ID, "password"))
-            )
+            logger.info("Looking for password field...")
+            try:
+                password_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "password"))
+                )
+            except TimeoutException:
+                # Save screenshot for debugging
+                try:
+                    screenshot_path = "/tmp/confluence_login_debug.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    logger.error(f"Screenshot saved to: {screenshot_path}")
+                except:
+                    pass
+
+                logger.error(f"Current URL: {self.driver.current_url}")
+                logger.error("Could not find password field. The page might be showing an error or 2FA prompt.")
+                raise ImproperlyConfigured(
+                    "Could not find password field. Check if 2FA is enabled or if username is incorrect."
+                )
+
             password_field.clear()
             password_field.send_keys(settings.CONFLUENCE_API_TOKEN)
+            logger.info("API token entered")
 
             # Click login button
             login_button = self.driver.find_element(By.ID, "login-submit")
             login_button.click()
+            logger.info("Clicked login button")
             time.sleep(5)
+
+            # Check if login was successful
+            current_url = self.driver.current_url
+            logger.info(f"After login, URL: {current_url}")
+
+            # Check for error messages
+            page_source = self.driver.page_source.lower()
+            if "incorrect" in page_source or "invalid" in page_source or "wrong" in page_source:
+                logger.error("Login credentials rejected")
+                raise ImproperlyConfigured(
+                    "API token rejected. Verify your token is correct and not expired. "
+                    "Get a new token at: https://id.atlassian.com/manage-profile/security/api-tokens"
+                )
+
+            # If we're still on the login page, something went wrong
+            if "login" in current_url or "authenticate" in current_url:
+                logger.error("Still on login page after authentication attempt")
+                raise ImproperlyConfigured(
+                    "Login failed - still on login page. Check credentials or try generating a new API token."
+                )
 
             logger.info("Successfully logged in to Confluence")
             self._authenticated = True
 
         except TimeoutException as e:
             logger.error(f"Login timeout - could not find login form elements: {e}")
+            logger.error(f"Current URL: {self.driver.current_url}")
             raise ImproperlyConfigured(
-                "Failed to log in to Confluence. Check your credentials and network connection."
+                f"Failed to log in to Confluence. Timeout waiting for page elements. "
+                f"Current URL: {self.driver.current_url}"
             )
-        except Exception as e:
-            logger.error(f"Login failed: {e}")
+        except ImproperlyConfigured:
             raise
+        except Exception as e:
+            logger.error(f"Login failed with unexpected error: {e}")
+            logger.error(f"Current URL: {self.driver.current_url}")
+            raise ImproperlyConfigured(
+                f"Login failed: {str(e)}. Check your credentials and network connection."
+            )
 
     def _check_authentication(self) -> bool:
         """Check if user is authenticated to Confluence."""
