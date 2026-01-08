@@ -12,6 +12,14 @@ services:
       - 27017:27017
     volumes:
       - mongo_data:/data/db
+      - /Volumes/MacMiniX/Users/scottc/MongoDB:/data/db/reports
+    command: [
+      "mongod",
+      "--wiredTigerCollectionBlockCompressor", "zstd",
+      "--directoryperdb",
+      "--wiredTigerCacheSizeGB", "1",
+      "--bind_ip_all"
+    ]
     networks:
       - local
     restart: always
