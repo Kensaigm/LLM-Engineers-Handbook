@@ -10,7 +10,8 @@ class MediumCrawler(BaseSeleniumCrawler):
     model = ArticleDocument
 
     def set_extra_driver_options(self, options) -> None:
-        options.add_argument(r"--profile-directory=Profile 2")
+        # Profile directory is already handled by base crawler's user-data-dir
+        pass
 
     def extract(self, link: str, **kwargs) -> None:
         old_model = self.model.find(link=link)

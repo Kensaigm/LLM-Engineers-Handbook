@@ -24,8 +24,61 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
         self._authenticated = False
 
     def set_extra_driver_options(self, options) -> None:
-        # Keep existing user session if available
-        options.add_experimental_option("detach", True)
+        # undetected-chromedriver doesn't support experimental options like detach
+        pass
+
+    def login(self) -> None:
+        """Log in to Confluence using username and password from settings."""
+        if not settings.CONFLUENCE_USERNAME or not settings.CONFLUENCE_API_TOKEN:
+            logger.warning(
+                "Confluence credentials not found in settings. "
+                "Set CONFLUENCE_USERNAME and CONFLUENCE_API_TOKEN environment variables."
+            )
+            return
+
+        logger.info("Attempting to log in to Confluence...")
+
+        # Navigate to Atlassian login page
+        base_url = "https://id.atlassian.com/login"
+        self.driver.get(base_url)
+        time.sleep(3)
+
+        try:
+            # Enter username/email
+            username_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "username"))
+            )
+            username_field.clear()
+            username_field.send_keys(settings.CONFLUENCE_USERNAME)
+
+            # Click continue/submit button
+            submit_button = self.driver.find_element(By.ID, "login-submit")
+            submit_button.click()
+            time.sleep(3)
+
+            # Enter password (API token for Atlassian Cloud)
+            password_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "password"))
+            )
+            password_field.clear()
+            password_field.send_keys(settings.CONFLUENCE_API_TOKEN)
+
+            # Click login button
+            login_button = self.driver.find_element(By.ID, "login-submit")
+            login_button.click()
+            time.sleep(5)
+
+            logger.info("Successfully logged in to Confluence")
+            self._authenticated = True
+
+        except TimeoutException as e:
+            logger.error(f"Login timeout - could not find login form elements: {e}")
+            raise ImproperlyConfigured(
+                "Failed to log in to Confluence. Check your credentials and network connection."
+            )
+        except Exception as e:
+            logger.error(f"Login failed: {e}")
+            raise
 
     def _check_authentication(self) -> bool:
         """Check if user is authenticated to Confluence."""
@@ -91,11 +144,20 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
         self.driver.get(space_url)
         time.sleep(3)
 
-        # Check authentication
+        # Check authentication and attempt login if needed
         if not self._check_authentication():
-            raise ImproperlyConfigured(
-                "Not authenticated to Confluence. Please log in manually or set CONFLUENCE_API_TOKEN."
-            )
+            logger.info("Not authenticated. Attempting to log in...")
+            self.login()
+
+            # Navigate back to the space URL after login
+            self.driver.get(space_url)
+            time.sleep(3)
+
+            # Verify authentication after login
+            if not self._check_authentication():
+                raise ImproperlyConfigured(
+                    "Authentication failed. Please check CONFLUENCE_USERNAME and CONFLUENCE_API_TOKEN settings."
+                )
 
         self.scroll_page()
 

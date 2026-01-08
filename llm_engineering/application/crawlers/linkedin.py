@@ -22,7 +22,8 @@ class LinkedInCrawler(BaseSeleniumCrawler):
         self._is_deprecated = is_deprecated
 
     def set_extra_driver_options(self, options) -> None:
-        options.add_experimental_option("detach", True)
+        # undetected-chromedriver doesn't support experimental options like detach
+        pass
 
     def login(self) -> None:
         if self._is_deprecated:
