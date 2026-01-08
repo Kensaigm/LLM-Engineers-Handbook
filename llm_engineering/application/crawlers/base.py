@@ -16,11 +16,12 @@ class BaseCrawler(ABC):
 
 
 class BaseSeleniumCrawler(BaseCrawler, ABC):
-    def __init__(self, scroll_limit: int = 5) -> None:
+    def __init__(self, scroll_limit: int = 5, headless: bool = True) -> None:
         options = uc.ChromeOptions()
 
         options.add_argument("--no-sandbox")
-        options.add_argument("--headless=new")
+        if headless:
+            options.add_argument("--headless=new")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--log-level=3")
         options.add_argument("--disable-popup-blocking")

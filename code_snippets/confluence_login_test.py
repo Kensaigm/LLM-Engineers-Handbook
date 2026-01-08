@@ -40,14 +40,19 @@ def main():
     print()
     print("-" * 80)
     print("Initializing crawler...")
+    print()
+    print("🔍 Running in VISIBLE mode so you can see what's happening...")
+    print("   (The browser window will open)")
+    print()
 
-    # Create crawler
-    crawler = ConfluenceCrawler(scroll_limit=5)
+    # Create crawler in non-headless mode for debugging
+    crawler = ConfluenceCrawler(scroll_limit=5, headless=False)
 
     print("Browser started successfully")
     print()
     print("-" * 80)
     print("Attempting login to Atlassian...")
+    print("Watch the browser window to see the login process...")
     print()
 
     try:

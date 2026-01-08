@@ -19,8 +19,8 @@ from .base import BaseSeleniumCrawler
 class ConfluenceCrawler(BaseSeleniumCrawler):
     model = ArticleDocument
 
-    def __init__(self, scroll_limit: int = 5, max_retries: int = 3, page_load_timeout: int = 30) -> None:
-        super().__init__(scroll_limit)
+    def __init__(self, scroll_limit: int = 5, max_retries: int = 3, page_load_timeout: int = 30, headless: bool = True) -> None:
+        super().__init__(scroll_limit, headless=headless)
         self._authenticated = False
         self.max_retries = max_retries
         self.page_load_timeout = page_load_timeout
