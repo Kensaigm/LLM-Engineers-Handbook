@@ -19,9 +19,11 @@ from .base import BaseSeleniumCrawler
 class ConfluenceCrawler(BaseSeleniumCrawler):
     model = ArticleDocument
 
-    def __init__(self, scroll_limit: int = 5) -> None:
+    def __init__(self, scroll_limit: int = 5, max_retries: int = 3, page_load_timeout: int = 30) -> None:
         super().__init__(scroll_limit)
         self._authenticated = False
+        self.max_retries = max_retries
+        self.page_load_timeout = page_load_timeout
 
     def set_extra_driver_options(self, options) -> None:
         # undetected-chromedriver doesn't support experimental options like detach
@@ -190,50 +192,106 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
         logger.info(f"Found {len(page_links)} unique pages in space")
         return page_links
 
-    def _extract_page_content(self, page_url: str) -> Optional[dict]:
-        """Extract content from a single Confluence page."""
-        logger.info(f"Extracting content from: {page_url}")
+    def _is_page_loaded(self, soup: BeautifulSoup) -> bool:
+        """Check if Confluence page has fully loaded with content."""
+        # Check for loading indicators
+        loading_indicators = soup.find_all(["div", "span"], class_=lambda x: x and ("loading" in x.lower() or "spinner" in x.lower()))
+        if loading_indicators:
+            return False
 
-        self.driver.get(page_url)
-        time.sleep(2)
-
-        soup = BeautifulSoup(self.driver.page_source, "html.parser")
-
-        # Extract title
-        title_elem = soup.find("h1", {"id": "title-text"}) or soup.find("h1")
-        title = title_elem.get_text(strip=True) if title_elem else "Untitled"
-
-        # Extract main content
-        # Confluence uses different content areas depending on version
+        # Check for actual content areas
         content_elem = (
             soup.find("div", {"id": "main-content"})
             or soup.find("div", {"class": "wiki-content"})
             or soup.find("div", {"class": "contentLayout2"})
         )
 
-        if not content_elem:
-            logger.warning(f"Could not find content area for page: {page_url}")
+        # Page is loaded if we have content with substantial text
+        if content_elem:
+            content_text = content_elem.get_text(strip=True)
+            # Require at least 10 characters of content to consider it loaded
+            return len(content_text) > 10
+
+        return False
+
+    def _extract_page_content(self, page_url: str, retry_attempt: int = 0) -> Optional[dict]:
+        """
+        Extract content from a single Confluence page with timeout detection.
+
+        Returns:
+            dict: Page content if successful
+            None: If page failed to load (should be retried)
+        """
+        logger.info(f"Extracting content from: {page_url} (attempt {retry_attempt + 1})")
+
+        try:
+            self.driver.get(page_url)
+
+            # Wait for page to load with timeout
+            start_time = time.time()
+            max_wait = self.page_load_timeout
+            wait_interval = 2
+
+            while time.time() - start_time < max_wait:
+                time.sleep(wait_interval)
+                soup = BeautifulSoup(self.driver.page_source, "html.parser")
+
+                if self._is_page_loaded(soup):
+                    logger.info(f"Page loaded successfully: {page_url}")
+                    break
+            else:
+                # Timeout reached
+                elapsed = time.time() - start_time
+                logger.warning(f"Page load timeout ({elapsed:.1f}s) for: {page_url}")
+                return None
+
+            # Extract title
+            title_elem = soup.find("h1", {"id": "title-text"}) or soup.find("h1")
+            title = title_elem.get_text(strip=True) if title_elem else "Untitled"
+
+            # Extract main content
+            content_elem = (
+                soup.find("div", {"id": "main-content"})
+                or soup.find("div", {"class": "wiki-content"})
+                or soup.find("div", {"class": "contentLayout2"})
+            )
+
+            if not content_elem:
+                logger.warning(f"Could not find content area for page: {page_url}")
+                return None
+
+            content_text = content_elem.get_text(separator="\n", strip=True)
+
+            # Verify we have substantial content
+            if len(content_text) < 10:
+                logger.warning(f"Insufficient content extracted from: {page_url}")
+                return None
+
+            # Extract metadata
+            metadata = {
+                "Title": title,
+                "Content": content_text,
+                "URL": page_url,
+            }
+
+            # Try to extract author/last modified if available
+            author_elem = soup.find("a", {"class": "confluence-userlink"})
+            if author_elem:
+                metadata["Last Modified By"] = author_elem.get_text(strip=True)
+
+            return metadata
+
+        except Exception as e:
+            logger.error(f"Error extracting content from {page_url}: {e}")
             return None
-
-        content_text = content_elem.get_text(separator="\n", strip=True)
-
-        # Extract metadata
-        metadata = {
-            "Title": title,
-            "Content": content_text,
-            "URL": page_url,
-        }
-
-        # Try to extract author/last modified if available
-        author_elem = soup.find("a", {"class": "confluence-userlink"})
-        if author_elem:
-            metadata["Last Modified By"] = author_elem.get_text(strip=True)
-
-        return metadata
 
     def extract(self, link: str, **kwargs) -> None:
         """
-        Extract pages from a Confluence space.
+        Extract pages from a Confluence space with intelligent retry logic.
+
+        Pages that fail to load are automatically deferred to the end of the queue
+        and retried after other pages have been processed. This helps with cloud-based
+        systems that load recently-accessed pages faster than stale pages.
 
         Args:
             link: URL to Confluence space overview or specific page
@@ -248,17 +306,17 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
         try:
             # Determine if this is a space URL or single page URL
             if "/spaces/" in link and "/overview" in link:
-                # This is a space overview - extract all pages
+                # This is a space overview - extract all pages with retry logic
                 page_links = self._extract_page_links(link)
 
                 logger.info(f"Processing {len(page_links)} pages from space")
 
-                for page_url in page_links:
-                    self._process_single_page(page_url, user)
+                # Process pages with deferred retry queue
+                self._process_pages_with_retry(page_links, user)
 
             else:
                 # This is a single page URL
-                self._process_single_page(link, user)
+                self._process_single_page(link, user, retry_attempt=0)
 
         except Exception as e:
             logger.exception(f"Error during Confluence crawl: {e}")
@@ -268,13 +326,79 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
 
         logger.info(f"Finished Confluence crawl: {link}")
 
-    def _process_single_page(self, page_url: str, user) -> None:
-        """Process a single Confluence page with change detection."""
-        content_data = self._extract_page_content(page_url)
+    def _process_pages_with_retry(self, page_urls: List[str], user) -> None:
+        """
+        Process pages with intelligent retry logic.
+
+        Pages that fail to load are moved to the back of the queue and retried
+        after other pages have been processed, up to max_retries times.
+        """
+        # Track retry attempts for each page
+        retry_tracker = {url: 0 for url in page_urls}
+
+        # Initialize queue with all pages
+        queue = list(page_urls)
+        processed_count = 0
+        failed_permanently = []
+
+        while queue:
+            page_url = queue.pop(0)
+            retry_attempt = retry_tracker[page_url]
+
+            logger.info(f"Processing page {processed_count + 1}/{len(page_urls)}: {page_url}")
+
+            success = self._process_single_page(page_url, user, retry_attempt=retry_attempt)
+
+            if success:
+                processed_count += 1
+                logger.info(f"✓ Successfully processed ({processed_count}/{len(page_urls)})")
+            else:
+                # Page failed to load
+                retry_tracker[page_url] += 1
+
+                if retry_tracker[page_url] < self.max_retries:
+                    # Defer to end of queue for retry
+                    queue.append(page_url)
+                    logger.warning(
+                        f"⟳ Deferring page to end of queue (retry {retry_tracker[page_url]}/{self.max_retries}): {page_url}"
+                    )
+                else:
+                    # Max retries reached
+                    failed_permanently.append(page_url)
+                    logger.error(
+                        f"✗ Page failed after {self.max_retries} attempts, skipping: {page_url}"
+                    )
+
+        # Summary
+        logger.info("=" * 80)
+        logger.info(f"Crawl Summary:")
+        logger.info(f"  Total pages: {len(page_urls)}")
+        logger.info(f"  Successfully processed: {processed_count}")
+        logger.info(f"  Failed permanently: {len(failed_permanently)}")
+
+        if failed_permanently:
+            logger.warning("Failed pages:")
+            for url in failed_permanently:
+                logger.warning(f"  - {url}")
+        logger.info("=" * 80)
+
+    def _process_single_page(self, page_url: str, user, retry_attempt: int = 0) -> bool:
+        """
+        Process a single Confluence page with change detection.
+
+        Args:
+            page_url: URL of the page to process
+            user: User document for author information
+            retry_attempt: Current retry attempt number
+
+        Returns:
+            bool: True if page was successfully processed, False if it should be retried
+        """
+        content_data = self._extract_page_content(page_url, retry_attempt=retry_attempt)
 
         if not content_data:
-            logger.warning(f"Skipping page due to extraction failure: {page_url}")
-            return
+            logger.warning(f"Failed to extract content from page: {page_url}")
+            return False  # Signal that page should be retried
 
         # Calculate content hash
         content_str = content_data.get("Content", "")
@@ -283,28 +407,34 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
         # Check if content has changed
         if not self._has_content_changed(page_url, content_hash):
             logger.info(f"Page content unchanged, skipping: {page_url}")
-            return
+            return True  # Successfully processed (no changes needed)
 
         # Check if document exists
         existing_doc = self.model.find(link=page_url)
 
-        if existing_doc:
-            logger.info(f"Updating existing page: {page_url}")
-            # Update the existing document
-            existing_doc.content = content_data
-            existing_doc.content_hash = content_hash
-            existing_doc.save()
-        else:
-            logger.info(f"Saving new page: {page_url}")
-            # Create new document
-            instance = self.model(
-                platform="confluence",
-                content=content_data,
-                link=page_url,
-                content_hash=content_hash,
-                author_id=user.id,
-                author_full_name=user.full_name,
-            )
-            instance.save()
+        try:
+            if existing_doc:
+                logger.info(f"Updating existing page: {page_url}")
+                # Update the existing document
+                existing_doc.content = content_data
+                existing_doc.content_hash = content_hash
+                existing_doc.save()
+            else:
+                logger.info(f"Saving new page: {page_url}")
+                # Create new document
+                instance = self.model(
+                    platform="confluence",
+                    content=content_data,
+                    link=page_url,
+                    content_hash=content_hash,
+                    author_id=user.id,
+                    author_full_name=user.full_name,
+                )
+                instance.save()
 
-        logger.info(f"Successfully processed page: {page_url}")
+            logger.info(f"Successfully processed page: {page_url}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving page to database: {page_url} - {e}")
+            return False

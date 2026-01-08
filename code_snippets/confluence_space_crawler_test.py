@@ -28,11 +28,23 @@ def main():
     print(f"User ID: {user.id}")
     print()
 
-    # Initialize crawler with higher scroll limit for long pages with charts
-    # Increased from 5 to 15 to handle lengthy pages with embedded content
+    # Initialize crawler with retry logic for slow-loading pages
+    # scroll_limit: Increased from 5 to 15 to handle lengthy pages with embedded content
+    # max_retries: Number of times to retry slow pages (default: 3)
+    # page_load_timeout: Seconds to wait for a page to load before deferring it (default: 30)
     scroll_limit = 15
-    print(f"Initializing Confluence crawler (scroll_limit={scroll_limit})...")
-    crawler = ConfluenceCrawler(scroll_limit=scroll_limit)
+    max_retries = 3
+    page_load_timeout = 30
+
+    print(f"Initializing Confluence crawler...")
+    print(f"  scroll_limit: {scroll_limit}")
+    print(f"  max_retries: {max_retries} (slow pages will be deferred and retried)")
+    print(f"  page_load_timeout: {page_load_timeout}s")
+    crawler = ConfluenceCrawler(
+        scroll_limit=scroll_limit,
+        max_retries=max_retries,
+        page_load_timeout=page_load_timeout
+    )
     print()
 
     try:
