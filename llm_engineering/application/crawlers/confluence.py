@@ -44,23 +44,53 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
         # Navigate to Atlassian login page
         base_url = "https://id.atlassian.com/login"
         self.driver.get(base_url)
-        time.sleep(3)
+
+        # Wait for page to fully load
+        logger.info("Waiting for login page to load...")
+        time.sleep(5)
 
         try:
-            # Enter username/email
+            # Wait for username/email field with multiple possible selectors
             logger.info("Looking for username field...")
-            username_field = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.ID, "username"))
-            )
+            username_field = None
+
+            # Try multiple selectors (Atlassian sometimes changes their form)
+            selectors = [
+                (By.ID, "username"),
+                (By.NAME, "username"),
+                (By.CSS_SELECTOR, "input[type='email']"),
+                (By.CSS_SELECTOR, "input[name='username']"),
+                (By.XPATH, "//input[@type='email' or @id='username']")
+            ]
+
+            for selector_type, selector_value in selectors:
+                try:
+                    username_field = WebDriverWait(self.driver, 15).until(
+                        EC.element_to_be_clickable((selector_type, selector_value))
+                    )
+                    logger.info(f"Found username field with selector: {selector_type}={selector_value}")
+                    break
+                except TimeoutException:
+                    continue
+
+            if not username_field:
+                raise TimeoutException("Could not find username field with any selector")
+
+            # Clear and enter username
             username_field.clear()
+            time.sleep(1)
             username_field.send_keys(settings.CONFLUENCE_USERNAME)
+            time.sleep(1)
             logger.info("Username entered")
 
             # Click continue/submit button
-            submit_button = self.driver.find_element(By.ID, "login-submit")
+            logger.info("Looking for submit button...")
+            submit_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "login-submit"))
+            )
             submit_button.click()
             logger.info("Clicked continue button")
-            time.sleep(5)  # Increased wait time
+            time.sleep(7)  # Wait for password page to load
 
             # Check for error messages on username page
             page_source = self.driver.page_source.lower()
@@ -73,10 +103,29 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
 
             # Enter password (API token for Atlassian Cloud)
             logger.info("Looking for password field...")
+            password_field = None
+
+            # Try multiple selectors for password field
+            password_selectors = [
+                (By.ID, "password"),
+                (By.NAME, "password"),
+                (By.CSS_SELECTOR, "input[type='password']"),
+                (By.XPATH, "//input[@type='password']")
+            ]
+
             try:
-                password_field = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "password"))
-                )
+                for selector_type, selector_value in password_selectors:
+                    try:
+                        password_field = WebDriverWait(self.driver, 15).until(
+                            EC.element_to_be_clickable((selector_type, selector_value))
+                        )
+                        logger.info(f"Found password field with selector: {selector_type}={selector_value}")
+                        break
+                    except TimeoutException:
+                        continue
+
+                if not password_field:
+                    raise TimeoutException("Could not find password field with any selector")
             except TimeoutException:
                 # Save screenshot for debugging
                 try:
@@ -93,14 +142,19 @@ class ConfluenceCrawler(BaseSeleniumCrawler):
                 )
 
             password_field.clear()
+            time.sleep(1)
             password_field.send_keys(settings.CONFLUENCE_API_TOKEN)
+            time.sleep(1)
             logger.info("API token entered")
 
             # Click login button
-            login_button = self.driver.find_element(By.ID, "login-submit")
+            logger.info("Looking for login button...")
+            login_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "login-submit"))
+            )
             login_button.click()
             logger.info("Clicked login button")
-            time.sleep(5)
+            time.sleep(10)  # Wait longer for authentication to complete
 
             # Check if login was successful
             current_url = self.driver.current_url
