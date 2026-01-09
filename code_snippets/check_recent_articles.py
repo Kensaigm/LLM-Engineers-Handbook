@@ -9,12 +9,12 @@ from llm_engineering.infrastructure.db.mongo import connection
 from llm_engineering.settings import settings
 
 
-def check_recent_articles(limit=10, platform="confluence"):
+def check_recent_articles(limit=20, platform="confluence"):
     """
     Check the most recently modified articles in MongoDB.
 
     Args:
-        limit: Number of articles to retrieve (default: 10)
+        limit: Number of articles to retrieve (default: 20)
         platform: Filter by platform (default: "confluence")
     """
     print("=" * 80)
